@@ -1,0 +1,116 @@
+[
+ {
+  "id": "CzZUn98mhTcEiCJo27Kv",
+  "service_name": "Gemini",
+  "service_key": "npdyhgECDJ6tB66MxXyo",
+  "affected_products": [
+   {
+    "title": "Gemini",
+    "id": "npdyhgECDJ6tB66MxXyo"
+   }
+  ],
+  "severity": "medium",
+  "status_impact": "SERVICE_DISRUPTION",
+  "begin": "2026-06-10T10:20:00+00:00",
+  "modified": "2026-06-16T17:41:16+00:00",
+  "uri": "incidents/CzZUn98mhTcEiCJo27Kv",
+  "external_desc": "**Title**\nGemini App in Workspace and Gemini Side Panel (Gemini in Workspace) customers are experiencing \u201cSomething Went Wrong\u201d errors.\n**Description**\nWe are experiencing an issue with Gemini beginning on Wednesday, 2026-06-10 03:26 PDT.\nOur engineering team continues to investigate the issue.\nWe will provide an update by Wednesday, 2026-06-10 06:30 PDT with current details.\nWe apologize to all w",
+  "most_recent_update": {
+   "status": "AVAILABLE",
+   "when": "2026-06-16T17:41:16+00:00",
+   "text": "# Incident Report\n## Summary\nOn Wednesday, June 10, 2026, at 03:30 US/Pacific, an incident occurred affecting the availability of Gemini services across all surfaces, including web, mobile (iOS and Android), and integrations within Google Chrome. The incident resulted in an elevated error rate for a"
+  }
+ },
+ {
+  "id": "jjs1U2FFkRyhjaacpvVv",
+  "service_name": "Gemini Notebook",
+  "service_key": "sqTm5ZmzCmb66kvyzcNS",
+  "affected_products": [
+   {
+    "title": "Gemini Notebook",
+    "id": "sqTm5ZmzCmb66kvyzcNS"
+   }
+  ],
+  "severity": "medium",
+  "status_impact": "SERVICE_DISRUPTION",
+  "begin": "2026-05-19T22:29:00+00:00",
+  "end": "2026-05-20T04:04:00+00:00",
+  "modified": "2026-05-20T04:38:08+00:00",
+  "uri": "incidents/jjs1U2FFkRyhjaacpvVv",
+  "external_desc": "**Summary**\nNotebookLM customers are experiencing an issue where account tiers are being incorrectly downgraded. Affected Ultra & Pro tier users are seeing Free tier features.\n**Description**\nWe are continuing to investigate an issue with NotebookLM where customers may experience a temporary downgrade in their account tier.\nOur engineering team has identified a potential root cause related to a re",
+  "most_recent_update": {
+   "status": "AVAILABLE",
+   "when": "2026-05-20T04:38:08+00:00",
+   "text": "**Title**\nNotebookLM customers may have experienced an issue where all premium account tiers are being incorrectly downgraded to free.\n**Description**\nThe issue with NotebookLM has been resolved for all affected users as of Tuesday, 2026-05-19 21:04 PDT.\nFrom preliminary analysis, the issue was trig"
+  }
+ },
+ {
+  "id": "1hr418kjGyBZ9ugXy3W3",
+  "service_name": "Gemini",
+  "service_key": "npdyhgECDJ6tB66MxXyo",
+  "affected_products": [
+   {
+    "title": "Gemini",
+    "id": "npdyhgECDJ6tB66MxXyo"
+   }
+  ],
+  "severity": "low",
+  "status_impact": "SERVICE_INFORMATION",
+  "begin": "2026-05-04T16:40:00+00:00",
+  "end": "2026-05-08T18:53:00+00:00",
+  "modified": "2026-05-08T18:58:23+00:00",
+  "uri": "incidents/1hr418kjGyBZ9ugXy3W3",
+  "external_desc": "**Summary**\nInvestigating elevated error rates with Gemini conversations.\n**Description**\nMitigation work is currently underway by our engineering team.\nWe do not have an ETA for mitigation at this point.\nWe will provide more information by Tuesday, 2026-05-05 20:30 PDT.\n**Symptoms**\nAffected customers are experiencing \"Something went wrong(13)\" error message in their Gemini conversations.\n**Worka",
+  "most_recent_update": {
+   "status": "AVAILABLE",
+   "when": "2026-05-08T18:58:09+00:00",
+   "text": "**Summary**\nGemini conversations may have experienced elevated error rates.\n**Description**\nThe issue with Gemini has been resolved for all affected users as of Friday, 2026-05-08 11:53 PDT.\nThe issue was triggered due to a combination of insufficient database resources, and application bugs. The da"
+  }
+ },
+ {
+  "id": "AWyE1SfEzpe8Qed49Rog",
+  "service_name": "Google Workspace Support",
+  "service_key": "dnz8HVUHoMMcW9wV91LY",
+  "affected_products": [
+   {
+    "title": "Google Workspace Support",
+    "id": "dnz8HVUHoMMcW9wV91LY"
+   }
+  ],
+  "severity": "medium",
+  "status_impact": "SERVICE_DISRUPTION",
+  "begin": "2026-06-30T09:03:00+00:00",
+  "end": "2026-07-01T03:45:00+00:00",
+  "modified": "2026-07-01T04:58:32+00:00",
+  "uri": "incidents/AWyE1SfEzpe8Qed49Rog",
+  "external_desc": "**Title**\nInbound emails from customers to Google Support are experiencing issues.\n**Description**\nWe are experiencing an issue with Google Cloud Support beginning on Tuesday, 2026-06-30 02:03 PDT.\nOur engineering team continues to investigate the issue.\nWe will provide an update by Tuesday, 2026-06-30 05:30 PDT with current details.\nWe apologize to all who are affected by the disruption.\n**Sympto",
+  "most_recent_update": {
+   "status": "AVAILABLE",
+   "when": "2026-07-01T04:58:32+00:00",
+   "text": "**Title**\n[Resolved] Inbound emails from customers to Google Support were experiencing issues.\n**Description**\nThe issue with inbound emails to Google Cloud Support has been resolved for all affected customers as of Tuesday, 2026-06-30 20:45 PDT.\nFrom preliminary analysis, the engineering team ident"
+  }
+ },
+ {
+  "id": "qqWhZSpoVLJWur1GfHfu",
+  "service_name": "Google Voice",
+  "service_key": "gh79SrQk6wqonWoxPdCm",
+  "affected_products": [
+   {
+    "title": "Google Voice",
+    "id": "gh79SrQk6wqonWoxPdCm"
+   }
+  ],
+  "severity": "low",
+  "status_impact": "SERVICE_INFORMATION",
+  "begin": "2026-06-22T19:30:00+00:00",
+  "end": "2026-06-23T00:46:00+00:00",
+  "modified": "2026-06-23T01:08:59+00:00",
+  "uri": "incidents/qqWhZSpoVLJWur1GfHfu",
+  "external_desc": "**Title**\nSome consumer Google Voice users are experiencing account suspensions.\n**Description**\nWe are experiencing an issue with Google Voice beginning at Monday, 2026-06-22 12:30 PDT.\nOur engineering team has identified the root cause and is actively working to mitigate the issue.\nWe will provide an update by Monday, 2026-06-22 17:30 PDT with current details.\nWe apologize to all who are affecte",
+  "most_recent_update": {
+   "status": "AVAILABLE",
+   "when": "2026-06-23T01:08:59+00:00",
+   "text": "**Title**\nSome consumer Google Voice users experienced account suspensions.\n**Description**\nThe issue with Google Voice has been resolved for all affected users as of Monday, 2026-06-22 17:46 PDT\nOur engineers have mitigated the issue by rolling back to a previous version and reinstating suspended a"
+  }
+ }
+]

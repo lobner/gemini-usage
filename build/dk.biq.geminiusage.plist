@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dk.biq.geminiusage</string>
+
+	<!-- Launch through `open` so macOS (LaunchServices) honours the bundle's
+	     LSUIElement flag and keeps the app out of the Dock and app switcher.
+	     `-W` makes the job stay alive for as long as the app runs.
+	     Adjust the path if you install the app somewhere other than /Applications. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/open</string>
+		<string>-W</string>
+		<string>/Applications/Gemini Usage.app</string>
+	</array>
+
+	<!-- Start automatically at login. Deliberately NO KeepAlive: choosing Quit
+	     from the menu should actually quit the app, not have launchd relaunch it. -->
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>
