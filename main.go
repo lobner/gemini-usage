@@ -1,9 +1,9 @@
-// Command geminiusage is a macOS menu-bar app that shows your Gemini Code Assist
-// quota as percentages in the menu-bar title — "<pro>% · <flash>%", the two
-// headline model tiers — and lists every tier with its reset time in the
-// dropdown. It reads Google's Code Assist quota endpoint directly with the
-// Gemini CLI's stored OAuth token and posts a Notification Centre banner when a
-// tier crosses a threshold.
+// Command geminiusage is a macOS menu-bar app that shows your Antigravity
+// Gemini quota as percentages in the menu-bar title - "<5h>% · <weekly>%", the
+// Gemini group's two limits - and lists every model group's windows with their
+// reset times in the dropdown. It reads the quota summary that Antigravity CLI
+// (`agy`) shows in /usage, directly from Google with agy's stored OAuth token,
+// and posts a Notification Centre banner when a window crosses a threshold.
 //
 // It also polls Google's Workspace Status Dashboard: whenever a Gemini product
 // has a running incident, a red dot appears in front of the percentages and the
@@ -11,11 +11,11 @@
 //
 // # What these numbers are, and are not
 //
-// These are Gemini Code Assist quotas — the meters behind the `gemini` CLI. They
-// are NOT the consumer app's 5-hour and weekly meters shown at
-// https://gemini.google.com/usage, which has no token-authenticated API and is
-// reachable only with whole-account Google session cookies. See internal/usage
-// and the README for why this app deliberately does not go there.
+// These are Antigravity quotas - the meters behind `agy`. They are NOT the
+// Gemini app's meters shown at https://gemini.google.com/usage, which has no
+// token-authenticated API and is reachable only with whole-account Google
+// session cookies. See internal/usage and the README for why this app
+// deliberately does not go there.
 //
 // The two sources are polled at different rates. The status dashboard needs no
 // credentials and is not rate limited, so it is read every POLL_SECONDS. The
@@ -59,21 +59,23 @@ const (
 
 	blinkInterval = 700 * time.Millisecond
 
-	// Unlike Anthropic's usage endpoint — which allows roughly one request per
-	// two minutes per token and forced claude-usage's 120 s floor — the Code
-	// Assist quota endpoint is comfortable at this rate: the Gemini CLI itself
-	// refreshes it whenever its cached copy is more than 30 s old. Do not copy
+	// Unlike Anthropic's usage endpoint - which allows roughly one request per
+	// two minutes per token and forced claude-usage's 120 s floor - the Cloud
+	// Code quota endpoint has been comfortable at this rate. Do not copy
 	// claude-usage's floor over; it is not the same endpoint and not the same
-	// limit.
+	// limit. A 429 still backs off.
 	defaultUsageInterval = 60 * time.Second
 	minUsageInterval     = 30 * time.Second
 	maxUsageBackoff      = 15 * time.Minute
 
-	// The consumer usage page. It is NOT where these numbers come from — see the
-	// package comment — but it is the page people mean by "Gemini usage", so the
-	// menu offers it with a tooltip that says which is which.
-	usagePageURL  = "https://gemini.google.com/usage"
-	statusPageURL = "https://www.google.com/appsstatus/dashboard/"
+	// The Gemini app's usage page. It is NOT where these numbers come from - see
+	// the package comment - but it is the page people mean by "Gemini usage", so
+	// the menu offers it with a tooltip that says which is which.
+	usagePageURL = "https://gemini.google.com/usage"
+	// The API key row opens AI Studio usage, which shows the same project's
+	// requests and spend.
+	aiStudioUsageURL = "https://aistudio.google.com/usage"
+	statusPageURL    = "https://www.google.com/appsstatus/dashboard/"
 
 	appName         = "Gemini Usage"
 	repoURL         = "https://github.com/lobner/gemini-usage"
@@ -111,6 +113,11 @@ var (
 	mAffected    *systray.MenuItem
 	mLastCheck   *systray.MenuItem
 	mLogin       *systray.MenuItem
+	mKey         *systray.MenuItem
+
+	// The API key's last good reading, poll-goroutine-only. It stands in for
+	// the title when there are no quota meters.
+	lastKey *usage.KeyUsage
 
 	refreshNow = make(chan struct{}, 1)
 
@@ -129,6 +136,7 @@ var (
 	// endpoint may be called again; backoff grows while it keeps saying no.
 	nextUsage    time.Time
 	usageBackoff time.Duration
+	nextKey      time.Time // when the API key row may be read again
 
 	// Shared between the poll goroutine (writer) and click goroutines (readers).
 	mu           sync.Mutex
@@ -155,10 +163,17 @@ func onReady() {
 		reset.Hide()
 		mTierResets = append(mTierResets, reset)
 	}
-	mTiers[0].SetTitle("Model quota: …")
+	mTiers[0].SetTitle("Antigravity quota: …")
 	mTiers[0].Show()
 
 	systray.AddSeparator()
+
+	// The Gemini API key's row, hidden until a key is found. It sits below the
+	// separator rather than above one of its own: systray cannot hide a
+	// separator, so a row-own separator would leave a double line with no key.
+	mKey = systray.AddMenuItem("", "Open AI Studio usage for the API key's project")
+	mKey.Hide()
+
 	mStatus = systray.AddMenuItem("Service status: checking…", "Open the Google Workspace Status Dashboard")
 
 	// Pre-allocate a fixed pool of incident rows, shown/hidden and relabelled on
@@ -179,7 +194,7 @@ func onReady() {
 
 	systray.AddSeparator()
 	mOpenPage := systray.AddMenuItem("Open usage page",
-		"Open gemini.google.com/usage — the consumer app's own meters, which are not the Code Assist quota shown above")
+		"Open gemini.google.com/usage - the Gemini app's own meters, which are not the Antigravity quota shown above")
 	mRefresh := systray.AddMenuItem("Refresh now", "Fetch quota immediately")
 	mLastCheck = systray.AddMenuItem("", "")
 	mLastCheck.Disable()
@@ -195,6 +210,11 @@ func onReady() {
 	mAbout := systray.AddMenuItem(aboutTitle(), aboutTooltip())
 	mQuit := systray.AddMenuItem("Quit", "Quit Gemini Usage")
 
+	go func() {
+		for range mKey.ClickedCh {
+			openURL(aiStudioUsageURL)
+		}
+	}()
 	go func() {
 		for range mOpenPage.ClickedCh {
 			openURL(usagePageURL)
@@ -362,6 +382,8 @@ func pollLoop() {
 			// actually called. If it refuses, the menu says so.
 			nextUsage = time.Time{}
 			usageBackoff = 0
+			usage.ForgetAPIKey()
+			nextKey = time.Time{}
 			check()
 		}
 	}
@@ -375,6 +397,13 @@ func check() {
 	// it first and on every poll — the dot must keep working while the quota
 	// endpoint is unavailable for any reason.
 	checkStatus(ctx)
+
+	// The key row has its own pacing, so a long quota back-off does not freeze
+	// it.
+	if !time.Now().Before(nextKey) {
+		checkAPIKey(ctx)
+		nextKey = time.Now().Add(usageInterval)
+	}
 
 	// Respect the pacing rather than calling the endpoint on every poll.
 	if time.Now().Before(nextUsage) {
@@ -398,21 +427,31 @@ func check() {
 		return
 
 	case errors.Is(err, usage.ErrNoCredentials):
-		showProblem("⚠ Gemini CLI not logged in", "Run `gemini` once to sign in",
-			"Gemini usage — not signed in", "Not signed in "+stamp, err)
+		showProblem("⚠ Antigravity CLI not logged in", "Run `agy` once to sign in",
+			"Gemini usage - not signed in to Antigravity", "Not signed in "+stamp, err)
+		keyTitle()
 		nextUsage = now.Add(usageInterval)
 		return
 
 	case errors.Is(err, usage.ErrTokenExpired):
 		// Keep the last known numbers; just flag that the token needs refreshing.
-		showProblem("⚠ OAuth token expired", "Run a `gemini` command to refresh",
-			"Gemini usage — token expired; refresh via the gemini CLI", "Token expired "+stamp, nil)
+		showProblem("⚠ OAuth token expired", "Run `agy` to refresh",
+			"Gemini usage - token expired; refresh by running agy", "Token expired "+stamp, nil)
 		nextUsage = now.Add(usageInterval)
 		return
 
 	case errors.Is(err, usage.ErrNotEligible):
-		showProblem("⚠ No Code Assist quota", "This account has no Code Assist project",
-			"Gemini usage — no Code Assist quota for this account", "Not eligible "+stamp, err)
+		detail := "This account has no Antigravity quota"
+		var ne usage.NotEligible
+		if errors.As(err, &ne) && ne.Code == "SUBSCRIPTION_REQUIRED" {
+			detail = "Google wants a licence for this account"
+		}
+		showProblem("⚠ No Antigravity quota", detail,
+			"Gemini usage - no Antigravity quota for this account", "Not eligible "+stamp, err)
+		if ne.Message != "" {
+			mTierResets[0].SetTooltip(ne.Message)
+		}
+		keyTitle()
 		// Nothing about this resolves on its own, so back right off rather than
 		// asking the same doomed question every minute.
 		nextUsage = now.Add(maxUsageBackoff)
@@ -435,6 +474,53 @@ func check() {
 	notifyThresholds(u)
 	mLastCheck.SetTitle("Last checked " + stamp)
 	mLastCheck.SetTooltip("")
+}
+
+// checkAPIKey reads the Gemini API key's request count into the key row. No
+// key is normal and hides the row; other problems show in the row itself, so
+// they never hide the quota meters.
+func checkAPIKey(ctx context.Context) {
+	k, err := usage.FetchAPIKey(ctx)
+	switch {
+	case err == nil:
+		lastKey = &k
+		mKey.SetTitle(fmt.Sprintf("API key: %s today", plural(k.Requests, "request")))
+		mKey.SetTooltip(fmt.Sprintf("Gemini API generateContent requests in project %s since %s (midnight Pacific). Click for AI Studio usage.",
+			k.Project, k.Since.Local().Format("15:04")))
+	case errors.Is(err, usage.ErrNoAPIKey):
+		lastKey = nil
+		mKey.Hide()
+		return
+	case errors.Is(err, usage.ErrKeyInvalid):
+		lastKey = nil
+		mKey.SetTitle("⚠ API key not valid - replace GEMINI_API_KEY")
+		mKey.SetTooltip("Google rejected the key. Get a new one at aistudio.google.com/apikey.")
+	case errors.Is(err, usage.ErrNoADC):
+		mKey.SetTitle("⚠ API key: run gcloud auth application-default login")
+		mKey.SetTooltip("The request count comes from Cloud Monitoring, which needs a gcloud login. " + err.Error())
+	case errors.Is(err, usage.ErrRateLimited):
+		return // keep the last reading on screen
+	default:
+		mKey.SetTitle("API key: count failed - " + truncate(reason(err), 40))
+		mKey.SetTooltip(err.Error())
+	}
+	mKey.Show()
+}
+
+// keyTitle puts the API key's request count in the title when there are no
+// quota meters, so an API-key-only setup does not show "⚠" for ever.
+func keyTitle() {
+	if lastKey == nil {
+		return
+	}
+	systray.SetTitle(fmt.Sprintf("%d req", lastKey.Requests))
+}
+
+func plural(n int64, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 // showProblem puts a credential-shaped problem in the first two tier rows and
@@ -491,7 +577,7 @@ func reason(err error) string {
 
 func updateUI(u usage.Usage) {
 	systray.SetTitle(title(u))
-	systray.SetTooltip("Gemini Code Assist quota — " + tooltipSummary(u))
+	systray.SetTooltip("Antigravity quota - " + tooltipSummary(u))
 
 	for i := 0; i < maxTierRows; i++ {
 		if i >= len(u.Tiers) {
@@ -501,7 +587,7 @@ func updateUI(u usage.Usage) {
 		}
 		m := u.Tiers[i]
 		mTiers[i].SetTitle(fmt.Sprintf("%s: %d%%", m.Name, m.Percent))
-		mTiers[i].SetTooltip(fmt.Sprintf("%d%% of the %s quota used (model %s)", m.Percent, m.Name, m.ModelID))
+		mTiers[i].SetTooltip(fmt.Sprintf("%d%% of the %s limit used (bucket %s)", m.Percent, m.Name, m.Bucket))
 		mTiers[i].Show()
 		setReset(mTierResets[i], m)
 	}
@@ -527,7 +613,7 @@ func tooltipSummary(u usage.Usage) string {
 		parts = append(parts, fmt.Sprintf("%s %d%%", m.Name, m.Percent))
 	}
 	if len(parts) == 0 {
-		return "no tiers reported"
+		return "no windows reported"
 	}
 	return strings.Join(parts, " · ")
 }
@@ -537,13 +623,27 @@ func setReset(mi *systray.MenuItem, m usage.Meter) {
 		mi.Hide()
 		return
 	}
-	mi.SetTitle("    resets " + humanizeReset(m.ResetsAt))
+	if m.Idle {
+		// Google reports "now + window" until the first request, so a date
+		// here would move on every poll.
+		mi.SetTitle("    resets " + windowWords(usage.WindowLength(m.Window)) + " after first use")
+	} else {
+		mi.SetTitle("    resets " + humanizeReset(m.ResetsAt))
+	}
 	mi.Show()
 }
 
 // humanizeReset formats a reset time as a short relative string for windows
 // resetting within a day ("in 1h 59m"), or an absolute weekday/time otherwise
 // ("Wed 22:59").
+// windowWords says a window length the way a person would: "5h", "7 days".
+func windowWords(d time.Duration) string {
+	if d >= 24*time.Hour && d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%d days", int(d/(24*time.Hour)))
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
 func humanizeReset(t time.Time) string {
 	d := time.Until(t)
 	switch {
@@ -554,7 +654,9 @@ func humanizeReset(t time.Time) string {
 	case d < 24*time.Hour:
 		return fmt.Sprintf("in %dh %dm", int(d.Hours()), int(d.Minutes())%60)
 	default:
-		return "on " + t.Local().Format("Mon 15:04")
+		// With the date: a weekly window resets on the same weekday, so
+		// "Thu 16:52" alone reads as today.
+		return "on " + t.Local().Format("Mon 2/1 15:04")
 	}
 }
 
@@ -568,7 +670,7 @@ func notifyThresholds(u usage.Usage) {
 	for _, m := range u.Tiers {
 		high := m.Percent >= alertPercent
 		if !firstRun && high && !alerted[m.Name] {
-			_ = notify.Banner("Gemini "+m.Name+" quota high",
+			_ = notify.Banner(m.Name+" quota high",
 				fmt.Sprintf("%s at %d%%", m.Name, m.Percent))
 		}
 		alerted[m.Name] = high
@@ -783,8 +885,8 @@ func openURL(u string) {
 }
 
 // usageIntervalFromEnv reads USAGE_SECONDS, refusing anything below
-// minUsageInterval: the endpoint is cheap but not free, and polling it faster
-// than the Gemini CLI's own 30 s staleness window buys nothing.
+// minUsageInterval: the endpoint is cheap but not free, and the windows are
+// hours long, so polling faster buys nothing.
 func usageIntervalFromEnv() time.Duration {
 	if v := os.Getenv("USAGE_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

@@ -1,5 +1,11 @@
 //go:build !ios
 
+// MODIFIED FILE. This file is from fyne.io/systray v1.12.1 (Apache License
+// 2.0, see LICENSE in this directory). gemini-usage changed the show_menu
+// method only: it attaches the menu to the status item and clicks the button,
+// so AppKit puts the menu directly below the menu bar. All other code is
+// unchanged from upstream.
+
 #import <Cocoa/Cocoa.h>
 #include "systray.h"
 
