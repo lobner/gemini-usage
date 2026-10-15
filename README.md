@@ -349,7 +349,7 @@ third_party/systray/    vendored fork of fyne.io/systray (see below)
 the sibling apps rather than shared through a module. Fix a bug in one, port it to
 the others.
 
-The app pins a **local fork of `fyne.io/systray`** under `third_party/systray`,
+The app pins a **local fork of `fyne.io/systray` v1.12.1** under `third_party/systray`,
 wired in via a `replace` directive in `go.mod`. The only change is a one-method
 patch to `show_menu` in `systray_darwin.m`: it attaches the menu to the status
 item and triggers it via the button so AppKit positions the dropdown directly
@@ -392,6 +392,17 @@ local server that answers both `:loadCodeAssist` and `:retrieveUserQuotaSummary`
 - **Per-model quotas** - `:retrieveUserQuota` returns one bucket per model id
   (`gemini-3.5-flash-low`, `claude-sonnet-5-5-high`, ...). The summary's groups
   are what `agy`'s `/usage` panel shows, so the app reads those.
+
+## Disclaimer
+
+This is an independent, unofficial project. It is not affiliated with, endorsed
+by or supported by Google. Gemini, Antigravity and Google Cloud are trademarks of
+Google LLC.
+
+The quota data comes from Google's internal, undocumented `v1internal` endpoints,
+which the app calls the way Antigravity CLI does. Google can change or close them
+at any time, and the app can then stop working. The app only reads your own
+account's quota with credentials that are already on your Mac.
 
 ## License
 
