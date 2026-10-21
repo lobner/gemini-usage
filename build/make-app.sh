@@ -46,10 +46,15 @@ COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILT=$(date -u +%Y-%m-%d)
 
 echo "Building binary… ($VERSION)"
-# systray links Cocoa, so cgo must be enabled (it is by default on macOS).
-CGO_ENABLED=1 go build -trimpath \
-	-ldflags "-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildDate=$BUILT" \
-	-o "$MACOS/$EXE" .
+# The stamps reach the binary through option_env! in src/main.rs. Cargo tracks
+# those variables, so a new stamp rebuilds the binary. Cargo is found in
+# ~/.cargo/bin when it is not on PATH. --target-dir overrides CARGO_TARGET_DIR
+# and build.target-dir, so the binary is always where the copy below reads it,
+# and never a stale one from an earlier build.
+CARGO=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
+GEMINIUSAGE_VERSION=$VERSION GEMINIUSAGE_COMMIT=$COMMIT GEMINIUSAGE_BUILD_DATE=$BUILT \
+	"$CARGO" build --release --locked --target-dir target
+cp "target/release/$EXE" "$MACOS/$EXE"
 
 cp build/Info.plist "$CONTENTS/Info.plist"
 
@@ -61,13 +66,13 @@ for key in CFBundleShortVersionString CFBundleVersion; do
 	/usr/libexec/PlistBuddy -c "Set :$key $PLIST_VERSION" "$CONTENTS/Info.plist" >/dev/null 2>&1 || true
 done
 
-# Ad-hoc sign with our own identifier. The Go linker already applies an ad-hoc
-# signature, but it identifies every binary it ever produces as "a.out" — and
-# macOS Background Task Management keys login items by signing identity, so two
-# unsigned Go apps look like the same item to it and registering one evicts the
-# other's "Open at Login" entry. Signing with -i gives this bundle a distinct,
-# stable identity. Still not a Developer ID and still not notarised: this buys
-# identity, not trust.
+# Ad-hoc sign with our own identifier. The linker already applies an ad-hoc
+# signature, but its identifier is not the bundle id (the Go linker called every
+# binary "a.out") - and macOS Background Task Management keys login items by
+# signing identity, so two such apps can look like the same item to it, and
+# registering one evicts the other's "Open at Login" entry. Signing with -i
+# gives this bundle a distinct, stable identity. Still not a Developer ID and
+# still not notarised: this buys identity, not trust.
 codesign --force --sign - --identifier "$BUNDLE_ID" "$APP" >/dev/null 2>&1 ||
 	echo "  warning: could not ad-hoc sign; Open at Login may clash with sibling apps" >&2
 
