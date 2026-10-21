@@ -243,11 +243,12 @@ The rule stays the same: the app writes no credentials.
 
 ## Build & run
 
-Requires Go 1.22+ (this repo pins `golang 1.25.11` via `.tool-versions`).
+Requires Rust (this repo pins `1.98.1` via `rust-toolchain.toml`, which `rustup`
+picks up by itself).
 
 ```sh
 # Run in the foreground (Ctrl-C to stop):
-go run .
+cargo run
 
 # Build the .app, and let it offer to install:
 ./build/make-app.sh
@@ -294,7 +295,7 @@ prompt from that copy. Answering it from the repo build means the next
 The offer is made once, either way. The answer is remembered in
 `~/Library/Application Support/dk.biq.geminiusage/launch-at-login`; delete that
 file to be asked again. It is also skipped when the binary isn't running from a
-bundle (`go run .`), since login items are bundles.
+bundle (`cargo run`), since login items are bundles.
 
 Each launch also *reconciles*: if the record says registered, the app registers
 again. That is a no-op when it already is, and it repairs the case where the login
@@ -305,10 +306,11 @@ checkbox will show unticked until you tick it again.
 
 Three notes on the mechanics:
 
-- **The bundle is ad-hoc signed with its own identifier.** The Go linker already
-  ad-hoc signs, but it calls every binary it produces `a.out`, and macOS keys
-  login items by signing identity — so two unsigned Go apps look like one item and
-  registering either one evicts the other's *Open at Login* entry. `make-app.sh`
+- **The bundle is ad-hoc signed with its own identifier.** The linker already
+  ad-hoc signs, but not with the bundle id (the Go linker, which built this app
+  before the Rust port, calls every binary `a.out`), and macOS keys login items
+  by signing identity — so two such apps can look like one item, and registering
+  either one evicts the other's *Open at Login* entry. `make-app.sh`
   runs `codesign --sign - --identifier <bundle id>` to give each build a distinct,
   stable identity. That matters more here than usual, because this app is designed
   to sit alongside its two siblings. It buys identity, not trust: these builds are
@@ -335,44 +337,53 @@ To set it up by hand instead:
 ## Project layout
 
 ```
-main.go                 systray wiring, poll loop, menu, threshold banners
-internal/usage/         Antigravity quota → window meters; API key → request count (apikey.go, monitoring.go)
-internal/status/        poll the Workspace Status Dashboard feed → indicator, incidents, products
-internal/icon/          the red status dot, drawn programmatically (no binary assets)
-internal/login/         open-at-login registration via SMAppService (cgo)
-internal/notify/        Notification Centre banner + confirm dialog via osascript
+src/main.rs             poll loop, icon blink, menu contents, threshold banners
+src/tray.rs             the status item and its menu, directly on AppKit via objc2
+src/usage/mod.rs        Antigravity quota → window meters; agy credentials; the User-Agent
+src/usage/apikey.rs     API key → its project, via gcloud ADC (read-only)
+src/usage/monitoring.rs the API key's request count from Cloud Monitoring
+src/status.rs           poll the Workspace Status Dashboard feed → indicator, incidents, products
+src/icon.rs             the red status dot, drawn programmatically (no binary assets)
+src/login.rs            open-at-login registration via SMAppService
+src/notify.rs           Notification Centre banner + confirm dialog via osascript
+src/http.rs             the shared HTTP agent (macOS trust store)
+src/env.rs              environment variables, read as Go's os.Getenv reads them
+src/duration.rs         Go-style durations ("2m30s") for the menu text
+src/json.rs             null-tolerant JSON fields
+testdata/               a trimmed capture of the real incident feed
 build/                  Info.plist, make-app.sh, LaunchAgent plist
-third_party/systray/    vendored fork of fyne.io/systray (see below)
 ```
 
-`internal/icon`, `internal/login` and `internal/notify` are **duplicated** from
-the sibling apps rather than shared through a module. Fix a bug in one, port it to
-the others.
+`src/icon.rs`, `src/login.rs`, `src/notify.rs` and `src/tray.rs` are
+**duplicated** from claude-usage rather than shared through a crate. Fix a bug in
+one, port it to the others.
 
-The app pins a **local fork of `fyne.io/systray` v1.12.1** under `third_party/systray`,
-wired in via a `replace` directive in `go.mod`. The only change is a one-method
-patch to `show_menu` in `systray_darwin.m`: it attaches the menu to the status
-item and triggers it via the button so AppKit positions the dropdown directly
-below the menu bar. Upstream pops the menu at the button's zero origin, which
-renders it *over* the menu-bar icons until a mouse move forces a relayout. To
-re-sync the fork to a newer upstream, re-copy it from the module cache and
-re-apply that patch.
+The app was written in Go and ported to Rust without changing its behaviour.
+`src/tray.rs` replaces the fork of `fyne.io/systray` that the Go build vendored.
+It keeps that package's model - calls from any thread, rows that are hidden and
+shown, never removed - and attaches the menu to the status item, so AppKit opens
+the dropdown directly below the menu bar. (That placement was the one patch the
+Go build made to its systray fork: upstream popped the menu at the button's zero
+origin, which drew it over the menu-bar icons.)
 
 ## Testing
 
 ```sh
-go test ./...   # unit tests (offline)
+cargo test      # unit tests (offline)
 
 # Opt-in diagnostics against the live endpoints:
-go test -tags livetest -run TestLiveFetch$ -v ./internal/usage  # needs a valid `agy` login
-go test -tags livetest -run TestLiveFetchAPIKey -v ./internal/usage  # needs GEMINI_API_KEY + ADC
-go test -tags livetest -run TestLiveStatus -v ./internal/status  # needs network only
+cargo test usage::tests::live_fetch -- --ignored --exact --nocapture   # needs a valid `agy` login
+cargo test live_fetch_api_key -- --ignored --nocapture                 # needs GEMINI_API_KEY + ADC
+cargo test live_status -- --ignored --nocapture                        # needs network only
 ```
+
+The gates before a push are `cargo fmt --check`, `cargo clippy --all-targets --
+-D warnings`, `cargo build` and `cargo test`.
 
 To see the outage UI without waiting for a real incident, point `STATUS_URL` at a
 saved incident feed served locally (e.g. `python3 -m http.server`) with an entry
 whose `end` field is removed and whose `affected_products` names Gemini. Note that
-`STATUS_URL` goes through `http.Client`, so a `file://` URL will **not** work.
+`STATUS_URL` goes through the HTTP client, so a `file://` URL will **not** work.
 
 To exercise the quota path against a fixture, point `CLOUDCODE_ENDPOINT` at a
 local server that answers both `:loadCodeAssist` and `:retrieveUserQuotaSummary`.
@@ -382,10 +393,9 @@ local server that answers both `:loadCodeAssist` and `:retrieveUserQuotaSummary`
 - **Consumer app meters** — see the caveat at the top. Reaching
   `gemini.google.com/usage` needs browser session cookies and cookie rotation;
   that is a deliberate non-goal, not a missing feature.
-- **Two-line display** — MenuMeters-style stacked numbers aren't possible through
-  stock `fyne.io/systray` (it force-sizes icon images to 16×16), so the title is a
-  single line. A stacked variant would need a custom `NSStatusItem` view — an
-  extension of the fork already vendored under `third_party/systray`.
+- **Two-line display** — MenuMeters-style stacked numbers need a custom view in
+  the `NSStatusItem` button, so the title is a single line. `src/tray.rs` owns the
+  status item directly, so that is where a stacked variant would go.
 - **More windows in the title** - the dropdown shows up to four windows (two per
   model group); the title keeps to the Gemini pair to keep the menu-bar footprint
   small.
@@ -407,7 +417,3 @@ account's quota with credentials that are already on your Mac.
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-
-It vendors a fork of [`fyne.io/systray`](https://github.com/fyne-io/systray)
-under `third_party/systray/`, which is licensed under the Apache License 2.0 and
-retains its own [`LICENSE`](third_party/systray/LICENSE).
