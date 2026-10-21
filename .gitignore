@@ -4,12 +4,8 @@
 # Built menu-bar app bundle (produced by build/make-app.sh)
 *.app/
 
-# Compiled binary
-/geminiusage
-
-# Test / coverage artifacts
-*.test
-*.out
+# Cargo build output
+/target
 
 # Local Claude Code settings
 .claude/

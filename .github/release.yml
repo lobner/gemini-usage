@@ -1,0 +1,49 @@
+changelog:
+  categories:
+    # First match wins. The first category is the deploy-attention one:
+    # `gh cut-release` warns about every PR in it before cutting, so put
+    # labels here that mean "a human has to do something when this deploys".
+    - title: ⚠️ Deploy needs attention
+      labels:
+        - Manual actions needed after deploy
+        - BREAKING
+
+    - title: 🔒 Security
+      labels:
+        - SECURITY FIX
+        - security
+
+    - title: ✨ Features
+      labels:
+        - feature
+        - enhancement
+
+    - title: 🐛 Fixes
+      labels:
+        - bugfix
+        - bug
+        - HOTFIX
+
+    - title: 🏗 DevOps & CI
+      labels:
+        - DevOps
+        - github_actions
+        - docker
+
+    - title: ⬆️ Dependencies
+      labels:
+        - dependencies
+
+    - title: 🧹 Refactoring & cleanup
+      labels:
+        - cleanup
+
+    - title: 📚 Docs & tests
+      labels:
+        - Documentation only
+        - documentation
+        - tests only
+
+    - title: Other changes
+      labels:
+        - "*"

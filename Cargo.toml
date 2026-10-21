@@ -1,0 +1,67 @@
+[package]
+name = "geminiusage"
+# The version shown in the app comes from `git describe`, stamped in by
+# build/make-app.sh. This one is never displayed.
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[dependencies]
+base64 = "=0.22.1"
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+crossbeam-channel = "=0.5.16"
+dispatch2 = "=0.3.1"
+httpdate = "=1.0.3"
+objc2 = "=0.6.5"
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSButton",
+    "NSButtonCell",
+    "NSCell",
+    "NSControl",
+    "NSImage",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSData",
+    "NSDate",
+    "NSError",
+    "NSGeometry",
+    "NSNotification",
+    "NSObject",
+    "NSString",
+    "NSTimeZone",
+    "objc2-core-foundation",
+] }
+objc2-service-management = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "SMAppService",
+    "objc2",
+    "objc2-foundation",
+] }
+png = "=0.18.1"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+# native-tls uses Security.framework, and src/http.rs selects the macOS trust
+# store, as Go's crypto/x509 does. (ureq checks for the full "native-tls"
+# feature at run time, so "native-tls-no-default" alone panics on https.) gzip
+# matches Go's transparent Accept-Encoding handling.
+ureq = { version = "=3.4.2", default-features = false, features = ["native-tls", "gzip"] }
+wait-timeout = "=0.2.1"
+
+[profile.release]
+# The equivalent of the Go build's -ldflags "-s -w": no symbols, no debug info.
+strip = true
+lto = true
+codegen-units = 1
