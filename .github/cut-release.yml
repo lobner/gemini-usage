@@ -1,0 +1,10 @@
+# Read by `gh cut-release` — https://github.com/BiQ/gh-cut-release
+#
+# The workflow a pushed vX.Y.Z tag triggers to build the release, or
+# `null` for a repository whose tag builds nothing.
+build_workflow: null
+
+# Defaults, shown for reference:
+# minor_labels: [feature, enhancement]   # any of these on a PR makes the bump a minor
+# breaking_labels: [BREAKING]            # any of these stops the cut and asks
+# quiet_labels: []                       # hidden in the plan, besides size and CONFLICT!
