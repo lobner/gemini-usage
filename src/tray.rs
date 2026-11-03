@@ -297,6 +297,10 @@ impl MenuItem {
         self.update(|i| i.setHidden(true));
     }
 
+    pub fn enable(&self) {
+        self.update(|i| i.setEnabled(true));
+    }
+
     pub fn disable(&self) {
         self.update(|i| i.setEnabled(false));
     }

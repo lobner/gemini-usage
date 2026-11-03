@@ -6,7 +6,8 @@
 //! file of the Antigravity app) but never refreshes or writes it. The access
 //! token lasts approximately one hour, and only running `agy` refreshes it.
 //! After it has expired, `fetch` returns `Kind::TokenExpired` until the next
-//! refresh.
+//! refresh. The menu can start that refresh on request with
+//! `refresh_agy_token`, which runs agy and lets agy write its own token.
 //!
 //! # Why Antigravity
 //!
@@ -473,19 +474,9 @@ fn user_agent() -> String {
     format!("antigravity/{v} {}", crate::platform())
 }
 
-/// Asks agy for its version once. A GUI app gets a minimal PATH, so
-/// ~/.local/bin (where agy's installer puts it) is tried explicitly. AGY_BIN
-/// overrides both.
+/// Asks agy for its version once.
 fn installed_agy_version() -> String {
-    let mut candidates = vec![env::var("AGY_BIN")];
-    let home = env::var("HOME");
-    if !home.is_empty() {
-        candidates.push(format!("{home}/.local/bin/agy"));
-    }
-    if let Some(p) = look_path("agy") {
-        candidates.push(p);
-    }
-    for bin in candidates.iter().filter(|b| !b.is_empty()) {
+    for bin in agy_candidates() {
         let mut cmd = Command::new(bin);
         cmd.arg("--version");
         if let Some(out) = output_by(cmd, Instant::now() + Duration::from_secs(5)) {
@@ -496,6 +487,42 @@ fn installed_agy_version() -> String {
         }
     }
     FALLBACK_AGY_VERSION.into()
+}
+
+/// The places to look for agy, in order. A GUI app gets a minimal PATH, so
+/// ~/.local/bin (where agy's installer puts it) is tried explicitly. AGY_BIN
+/// overrides both.
+fn agy_candidates() -> Vec<String> {
+    let mut candidates = vec![env::var("AGY_BIN")];
+    let home = env::var("HOME");
+    if !home.is_empty() {
+        candidates.push(format!("{home}/.local/bin/agy"));
+    }
+    if let Some(p) = look_path("agy") {
+        candidates.push(p);
+    }
+    candidates.retain(|b| !b.is_empty());
+    candidates
+}
+
+/// Lets agy refresh its own OAuth token, by running `agy models`. That
+/// command needs a valid token, so agy refreshes and stores it first. It asks
+/// nothing and uses no quota. This app still never touches the token itself:
+/// agy owns it and writes it - see the module comment.
+pub fn refresh_agy_token(deadline: Instant) -> Result<(), String> {
+    let Some(bin) = agy_candidates()
+        .into_iter()
+        .find(|b| std::fs::metadata(b).is_ok_and(|m| m.is_file()))
+    else {
+        return Err("agy not found in ~/.local/bin or PATH; set AGY_BIN".into());
+    };
+    let mut cmd = Command::new(&bin);
+    cmd.arg("models");
+    match run_by(cmd, deadline) {
+        Some((true, _)) => Ok(()),
+        Some((false, _)) => Err(format!("`{bin} models` failed or timed out")),
+        None => Err(format!("could not run {bin}")),
+    }
 }
 
 /// Finds an executable in PATH, as Go's exec.LookPath does. Relative entries
@@ -1017,6 +1044,16 @@ mod tests {
         assert_eq!(parse_agy_version("1.3.5\n"), "1.3.5");
         assert_eq!(parse_agy_version("agy version v1.4.0 (x)"), "1.4.0");
         assert_eq!(parse_agy_version("no version here"), "");
+    }
+
+    #[test]
+    fn refresh_agy_token_reports_the_exit_status() {
+        let deadline = || Instant::now() + Duration::from_secs(5);
+        env::overrides::set("AGY_BIN", "/usr/bin/true");
+        assert_eq!(refresh_agy_token(deadline()), Ok(()));
+        env::overrides::set("AGY_BIN", "/usr/bin/false");
+        let err = refresh_agy_token(deadline()).expect_err("false exits 1");
+        assert!(err.contains("/usr/bin/false models"), "{err}");
     }
 
     #[test]

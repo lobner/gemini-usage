@@ -161,6 +161,10 @@ The app is **read-only**: it uses whatever OAuth token `agy` has stored and
 - Once it expires, every poll returns "token expired", the title shows **"⚠"**,
   the numbers stop updating, and the menu shows **"⚠ OAuth token expired - Run
   `agy` to refresh"** until you next use `agy`.
+- Click **"Run `agy` to refresh"** to refresh from the menu. The app runs
+  `agy models`, which asks nothing and uses no quota. `agy` refreshes and stores
+  its own token first, and then the app fetches the quota again. If `agy` fails,
+  a banner says why. The app finds `agy` in `AGY_BIN`, `~/.local/bin` or `PATH`.
 - If you have never logged in, the menu says **"⚠ Antigravity CLI not logged
   in"**.
 - If the account has no Antigravity quota, it says **"⚠ No Antigravity quota"**
@@ -236,6 +240,10 @@ credentials belong to `agy` too. A meter that shows `⚠` until you next run `ag
 a far better failure than a meter that borrows another app's identity or corrupts
 your login.
 
+The *Run `agy` to refresh* row keeps to this rule. It only starts `agy` when you
+click it. `agy` refreshes and writes its own token with its own client, and the
+app reads the result as usual. The app never refreshes on its own schedule.
+
 The [API key row](#api-key-row) does exchange a refresh token, but only the gcloud
 ADC one, with gcloud's own client, and only in memory. The app never writes the ADC
 file, and gcloud does not rotate that refresh token, so there is no owner to race.
@@ -273,7 +281,7 @@ bundle by the path it was registered from — see below.
 | `ALERT_PERCENT`           | `80`    | Banner when a window first reaches this %. `0` disables alerts. |
 | `STATUS_URL`              | `https://www.google.com/appsstatus/dashboard/incidents.json` | Incident feed to poll for the outage dot. |
 | `CLOUDCODE_ENDPOINT`      | `https://daily-cloudcode-pa.googleapis.com` | Quota host. |
-| `AGY_BIN`                 | `~/.local/bin/agy` | The `agy` binary to ask for its version (User-Agent). |
+| `AGY_BIN`                 | `~/.local/bin/agy` | The `agy` binary to ask for its version (User-Agent) and to run for a token refresh. |
 | `GOOGLE_CLOUD_PROJECT`    | —       | API key row: skip the key lookup and use this project id.     |
 | `GEMINI_API_KEY`          | —       | The key for the API key row. Read from the login shell when not set. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `~/.config/gcloud/application_default_credentials.json` | The ADC file for the API key row. |
