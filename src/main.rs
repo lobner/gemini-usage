@@ -30,7 +30,7 @@
 //!     ALERT_PERCENT         notify when a tier first reaches this % (default 80, 0=off)
 //!     STATUS_URL            incident feed to poll (default the Workspace dashboard)
 //!     CLOUDCODE_ENDPOINT    quota host (default https://daily-cloudcode-pa.googleapis.com)
-//!     AGY_BIN               the agy binary to ask for its version (User-Agent)
+//!     AGY_BIN               the agy binary for the User-Agent and the token refresh
 //!     GOOGLE_CLOUD_PROJECT  API key row: skip the key lookup and use this project id
 
 mod duration;
@@ -70,6 +70,11 @@ const BLINK_INTERVAL: Duration = Duration::from_millis(700);
 const DEFAULT_USAGE_INTERVAL: Duration = Duration::from_secs(60);
 const MIN_USAGE_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_USAGE_BACKOFF: Duration = Duration::from_secs(15 * 60);
+
+// The row under "⚠ OAuth token expired". A click runs `agy models`, which
+// refreshes agy's token; it takes a few seconds.
+const AGY_REFRESH_TITLE: &str = "Run `agy` to refresh";
+const AGY_REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
 
 // The usage page of the Gemini app. These numbers do NOT come from it - see the
 // module comment - but it is the page people mean by "Gemini usage", so the
@@ -227,6 +232,7 @@ fn on_ready() {
     on_click(&open_page, || open_url(USAGE_PAGE_URL));
     on_click(&status, || open_url(STATUS_PAGE_URL));
     on_click(&refresh, trigger_refresh);
+    on_click(&tier_resets[0], run_agy_refresh);
     on_click(&login, toggle_launch_at_login);
     on_click(&about, || open_url(&release_notes_url()));
     thread::spawn(move || {
@@ -512,11 +518,17 @@ impl Poller {
                 // refresh.
                 show_problem(
                     "⚠ OAuth token expired",
-                    "Run `agy` to refresh",
+                    AGY_REFRESH_TITLE,
                     "Gemini usage - token expired; refresh by running agy",
                     &format!("Token expired {stamp}"),
                     None,
                 );
+                // The row runs agy when clicked. Signing in (NoCredentials)
+                // needs a browser, so that row stays text only.
+                m.tier_resets[0].set_tooltip(
+                    "Run `agy models`, which refreshes agy's token, then refresh the quota",
+                );
+                m.tier_resets[0].enable();
                 self.next_usage = Some(now + CONFIG.usage_interval);
             }
             Kind::NotEligible(detail) => {
@@ -713,6 +725,8 @@ fn show_problem(
     m.tiers[0].set_title(headline);
     m.tiers[0].show();
     m.tier_resets[0].set_title(&format!("    {detail}"));
+    m.tier_resets[0].set_tooltip("");
+    m.tier_resets[0].disable(); // the token-expired case enables it again
     m.tier_resets[0].show();
     for i in 1..MAX_TIER_ROWS {
         m.tiers[i].hide();
@@ -739,6 +753,9 @@ fn update_ui(u: &usage::Usage) {
     tray::set_title(&title(u));
     tray::set_tooltip(&format!("Antigravity quota - {}", tooltip_summary(u)));
 
+    // The first reset row may have been the clickable agy row.
+    m.tier_resets[0].set_tooltip("");
+    m.tier_resets[0].disable();
     for i in 0..MAX_TIER_ROWS {
         let Some(meter) = u.tiers.get(i) else {
             m.tiers[i].hide();
@@ -1004,6 +1021,23 @@ fn incident_url(i: usize) -> String {
 
 fn trigger_refresh() {
     let _ = REFRESH_NOW.0.try_send(()); // or a refresh is already queued
+}
+
+/// Runs agy so that it refreshes its expired token, then refreshes the quota.
+/// The row is disabled while agy runs, so a second click cannot start a second
+/// agy.
+fn run_agy_refresh() {
+    let row = &menu().tier_resets[0];
+    row.disable();
+    row.set_title("    Running `agy`…");
+    match usage::refresh_agy_token(Instant::now() + AGY_REFRESH_TIMEOUT) {
+        Ok(()) => trigger_refresh(), // the poll relabels the row
+        Err(e) => {
+            let _ = notify::banner("Gemini Usage", &format!("Could not refresh the token: {e}"));
+            row.set_title(&format!("    {AGY_REFRESH_TITLE}"));
+            row.enable();
+        }
+    }
 }
 
 /// Opens `u` in the default browser, without waiting for it.
