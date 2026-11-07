@@ -18,7 +18,8 @@ export const ORIGIN = "https://gemini.google.com";
 export const ASSET_BASE = "https://www.gstatic.com/bg3/boq-bard-web/islands/assets/";
 export const QUERY_PATH = "/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery";
 
-// The variables that the usage page sends with the query.
+// The variables that the usage page sends with the query (from the "usage"
+// route's preload in usage-<hash>.js). Both are non-null in the query.
 export const QUERY_VARIABLES = {
   g1Request: {
     entrypoints: [
@@ -26,7 +27,14 @@ export const QUERY_VARIABLES = {
       "GEMINI_USAGE_SETTINGS_AI_CREDITS_UPSELL_CARD",
       "GEMINI_USAGE_SETTINGS_UPGRADE_AND_CREDITS_BANNER",
     ],
-    upsellSource: "UPSELL_SOURCE_CHROME",
+  },
+  workspaceRequest: {
+    recommendationsForSurfaceRequests: [
+      {
+        recommendationSurface: { rpOnramp: "GEMINI_CHAT_USAGE_LIMITS_UPSELL", version: "1" },
+        maxRecommendationCount: 1,
+      },
+    ],
   },
 };
 

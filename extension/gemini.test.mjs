@@ -30,7 +30,14 @@ test("builds the query URL", () => {
   assert.equal(u.origin, "https://gemini.google.com");
   assert.equal(u.pathname, "/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery");
   assert.equal(u.searchParams.get("query_signature"), "2/abc+def=");
-  assert.equal(JSON.parse(u.searchParams.get("variables")).g1Request.upsellSource, "UPSELL_SOURCE_CHROME");
+  // Both variables are non-null in UsagePageQuery; Google refuses the query
+  // without workspaceRequest.
+  const vars = JSON.parse(u.searchParams.get("variables"));
+  assert.equal(vars.g1Request.entrypoints.length, 3);
+  assert.equal(
+    vars.workspaceRequest.recommendationsForSurfaceRequests[0].recommendationSurface.rpOnramp,
+    "GEMINI_CHAT_USAGE_LIMITS_UPSELL",
+  );
 });
 
 test("reads the pools from the answer", () => {
