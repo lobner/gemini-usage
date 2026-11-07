@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Gemini Usage bridge</title>
+  <style>
+    :root { color-scheme: light dark; font: 13px -apple-system, system-ui, sans-serif; }
+    body { margin: 12px; width: 280px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 10px; }
+    dt { color: GrayText; }
+    dd { margin: 0; }
+    .error { color: #c5221f; }
+    button { font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Gemini Usage bridge</h1>
+  <dl id="out"><dt>Status</dt><dd>no reading yet</dd></dl>
+  <button id="refresh" type="button">Refresh now</button>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
