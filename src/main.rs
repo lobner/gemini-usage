@@ -15,8 +15,11 @@
 //! These are Antigravity quotas - the meters behind `agy`. They are NOT the
 //! meters of the Gemini app at https://gemini.google.com/usage, which has no
 //! token-authenticated API and is reachable only with whole-account Google
-//! session cookies. See the usage module and the README for why this app
-//! deliberately does not go there.
+//! session cookies. This app does not touch those cookies.
+//!
+//! The Gemini app's meters come in from the browser extension in `extension/`
+//! instead (see the web module). While the extension reports, its two windows
+//! take the title, and the Antigravity windows stay in the dropdown.
 //!
 //! The two sources are polled at different rates. The status dashboard needs
 //! no credentials and has no rate limit, so it is read every POLL_SECONDS. The
@@ -32,6 +35,7 @@
 //!     CLOUDCODE_ENDPOINT    quota host (default https://daily-cloudcode-pa.googleapis.com)
 //!     AGY_BIN               the agy binary for the User-Agent and the token refresh
 //!     GOOGLE_CLOUD_PROJECT  API key row: skip the key lookup and use this project id
+//!     GEMINI_WEB_PORT       local port for the browser extension (default 47614)
 
 mod duration;
 mod env;
@@ -45,6 +49,7 @@ mod status;
 mod testserver;
 mod tray;
 mod usage;
+mod web;
 
 use std::collections::{HashMap, HashSet};
 use std::process::{Command, Stdio};
@@ -124,6 +129,12 @@ static CONFIG: LazyLock<Config> = LazyLock::new(|| Config {
 
 /// The rows that change after startup.
 struct Menu {
+    // The Gemini app's two windows from the browser extension, each with its
+    // reset line, and a header over the Antigravity rows below them. All are
+    // hidden until the extension first reports.
+    web: Vec<MenuItem>,
+    web_resets: Vec<MenuItem>,
+    antigravity_header: MenuItem,
     // Tier rows come in pairs - the meter and its reset line - because Google
     // decides the number of tiers the endpoint returns, not us.
     tiers: Vec<MenuItem>,
@@ -160,8 +171,29 @@ fn main() {
 }
 
 fn on_ready() {
-    tray::set_title("…");
-    tray::set_tooltip("Gemini usage — checking…");
+    set_quota_title("…");
+    set_quota_tooltip("Gemini usage — checking…");
+
+    // The Gemini app rows, filled by the browser extension's reports.
+    let mut web = Vec::with_capacity(2);
+    let mut web_resets = Vec::with_capacity(2);
+    for _ in 0..2 {
+        let mi = tray::add_item("", "");
+        mi.disable();
+        mi.hide();
+        web.push(mi);
+
+        let reset = tray::add_item("", "");
+        reset.disable();
+        reset.hide();
+        web_resets.push(reset);
+    }
+    let antigravity_header = tray::add_item(
+        "Antigravity (agy):",
+        "The quota of Antigravity CLI, as `agy` shows it in /usage",
+    );
+    antigravity_header.disable();
+    antigravity_header.hide();
 
     // The tier rows. They are relabelled, shown and hidden on each poll.
     let mut tiers = Vec::with_capacity(MAX_TIER_ROWS);
@@ -208,7 +240,7 @@ fn on_ready() {
     tray::add_separator();
     let open_page = tray::add_item(
         "Open usage page",
-        "Open gemini.google.com/usage - the Gemini app's own meters, which are not the Antigravity quota shown above",
+        "Open gemini.google.com/usage - the Gemini app's own meters",
     );
     let refresh = tray::add_item("Refresh now", "Fetch quota immediately");
     let last_check = tray::add_item("", "");
@@ -246,6 +278,9 @@ fn on_ready() {
     });
 
     let _ = MENU.set(Menu {
+        web,
+        web_resets,
+        antigravity_header,
         tiers,
         tier_resets,
         status,
@@ -255,6 +290,12 @@ fn on_ready() {
         login,
         key,
     });
+
+    // Without the port, for example when a second copy runs, the app works as
+    // before: the Gemini app rows stay hidden.
+    if let Err(e) = web::start(on_web_report) {
+        eprintln!("gemini-usage: no browser extension listener: {e}");
+    }
 
     thread::spawn(icon_loop);
     thread::spawn(|| Poller::default().run());
@@ -451,6 +492,10 @@ impl Poller {
         let deadline = Instant::now() + Duration::from_secs(25);
         let m = menu();
 
+        // The extension reports on its own clock. Re-render on every poll, so
+        // the reset times count down and a stale reading gives the title back.
+        render_web();
+
         // The status dashboard needs no credentials and has no rate limit, so
         // check it first and on every poll: the dot must keep working while the
         // quota endpoint is not available for any reason.
@@ -558,7 +603,7 @@ impl Poller {
             _ => {
                 // Say what went wrong: a bare "failed" looks the same as the
                 // rate limiting above, which made this hard to diagnose.
-                tray::set_tooltip("Gemini usage — update failed");
+                set_quota_tooltip("Gemini usage — update failed");
                 m.last_check.set_title(&format!(
                     "Last check failed {stamp} — {}",
                     truncate(&reason(&err.to_string()), 48)
@@ -621,7 +666,7 @@ impl Poller {
     /// ever.
     fn key_title(&self) {
         if let Some(k) = &self.last_key {
-            tray::set_title(&format!("{} req", k.requests));
+            set_quota_title(&format!("{} req", k.requests));
         }
     }
 
@@ -719,8 +764,8 @@ fn show_problem(
     err: Option<&usage::Error>,
 ) {
     let m = menu();
-    tray::set_title("⚠");
-    tray::set_tooltip(tooltip);
+    set_quota_title("⚠");
+    set_quota_tooltip(tooltip);
 
     m.tiers[0].set_title(headline);
     m.tiers[0].show();
@@ -750,8 +795,8 @@ fn reason(s: &str) -> String {
 
 fn update_ui(u: &usage::Usage) {
     let m = menu();
-    tray::set_title(&title(u));
-    tray::set_tooltip(&format!("Antigravity quota - {}", tooltip_summary(u)));
+    set_quota_title(&title(u));
+    set_quota_tooltip(&format!("Antigravity quota - {}", tooltip_summary(u)));
 
     // The first reset row may have been the clickable agy row.
     m.tier_resets[0].set_tooltip("");
@@ -770,6 +815,155 @@ fn update_ui(u: &usage::Usage) {
         m.tiers[i].show();
         set_reset(&m.tier_resets[i], meter);
     }
+}
+
+/// What the Antigravity side last asked for in the title and the tooltip. The
+/// Gemini app windows from the browser extension take their place while they
+/// are fresh. So every writer goes through set_quota_title and
+/// set_quota_tooltip, and render_title decides.
+static QUOTA_TITLE: Mutex<(String, String)> = Mutex::new((String::new(), String::new()));
+
+fn set_quota_title(title: &str) {
+    QUOTA_TITLE.lock().unwrap().0 = title.to_string();
+    render_title();
+}
+
+fn set_quota_tooltip(tooltip: &str) {
+    QUOTA_TITLE.lock().unwrap().1 = tooltip.to_string();
+    render_title();
+}
+
+/// Puts the fresh Gemini app windows in the title, or else what the
+/// Antigravity side asked for. It holds the lock while it writes, so two
+/// threads cannot leave the older title on screen.
+fn render_title() {
+    let q = QUOTA_TITLE.lock().unwrap();
+    match fresh_reading(Utc::now()) {
+        Some(r) => {
+            tray::set_title(&web_title(&r));
+            tray::set_tooltip(&format!(
+                "Gemini app - {}% current, {}% weekly · {}",
+                r.five_hour.percent, r.weekly.percent, q.1
+            ));
+        }
+        None => {
+            tray::set_title(&q.0);
+            tray::set_tooltip(&q.1);
+        }
+    }
+}
+
+fn fresh_reading(now: DateTime<Utc>) -> Option<web::Reading> {
+    web::state().reading.filter(|r| !r.is_stale(now))
+}
+
+/// The title for the Gemini app windows: "<current>% · <weekly>%", the same
+/// shape as the Antigravity pair.
+fn web_title(r: &web::Reading) -> String {
+    format!("{}% · {}%", r.five_hour.percent, r.weekly.percent)
+}
+
+/// Shows the browser extension's last report in the Gemini app rows, and
+/// gives the title to its windows while they are fresh.
+fn render_web() {
+    let m = menu();
+    let st = web::state();
+    let now = Utc::now();
+    let Some(r) = &st.reading else {
+        for mi in m.web_resets.iter().chain(&m.web[1..]) {
+            mi.hide();
+        }
+        match &st.error {
+            None => {
+                m.web[0].hide();
+                m.antigravity_header.hide();
+            }
+            Some(e) => {
+                m.web[0].set_title(&format!("⚠ Gemini app: {}", truncate(e, 48)));
+                m.web[0].set_tooltip(&format!(
+                    "The browser extension could not read gemini.google.com/usage: {e}"
+                ));
+                m.web[0].show();
+                m.antigravity_header.show();
+            }
+        }
+        render_title();
+        return;
+    };
+
+    let mut tip = format!(
+        "From gemini.google.com/usage through the browser extension, read {}",
+        r.read_at.with_timezone(&Local).format("%H:%M:%S")
+    );
+    if !r.plan.is_empty() {
+        tip += &format!(" ({} plan)", r.plan);
+    }
+    if let Some(e) = &st.error {
+        tip += &format!(". The last read failed: {e}");
+    }
+    let windows = [("5h", &r.five_hour), ("weekly", &r.weekly)];
+    for (i, (label, w)) in windows.into_iter().enumerate() {
+        m.web[i].set_title(&format!("Gemini app {label}: {}%", w.percent));
+        m.web[i].set_tooltip(&tip);
+        m.web[i].show();
+        match w.resets_at {
+            Some(t) => {
+                m.web_resets[i].set_title(&format!("    resets {}", humanize_reset(t, now)));
+                m.web_resets[i].show();
+            }
+            None => m.web_resets[i].hide(),
+        }
+    }
+    if r.is_stale(now) {
+        // The browser is closed, or the extension stopped: say so where the
+        // numbers are, as the title has gone back to Antigravity.
+        m.web_resets[0].set_title(&format!(
+            "    not updated since {} - is the browser running?",
+            r.read_at.with_timezone(&Local).format("%H:%M")
+        ));
+        m.web_resets[0].show();
+    }
+    m.antigravity_header.show();
+    render_title();
+}
+
+fn on_web_report(r: &web::Report) {
+    if let web::Report::Usage(reading) = r {
+        notify_web(reading);
+    }
+    render_web();
+}
+
+/// The alert state of the two Gemini app windows. It is None until the first
+/// reading, which only sets the baseline, as for the Antigravity tiers.
+static WEB_ALERTED: Mutex<Option<[bool; 2]>> = Mutex::new(None);
+
+/// Sends a banner the first time a Gemini app window reaches the alert
+/// percentage, and arms again after it drops back below.
+fn notify_web(r: &web::Reading) {
+    let alert = CONFIG.alert_percent;
+    if alert <= 0 {
+        return;
+    }
+    let mut alerted = WEB_ALERTED.lock().unwrap();
+    let windows = [
+        ("Gemini app 5h", r.five_hour.percent),
+        ("Gemini app weekly", r.weekly.percent),
+    ];
+    let mut high = [false; 2];
+    for (i, (name, percent)) in windows.into_iter().enumerate() {
+        high[i] = percent >= alert;
+        if let Some(was) = *alerted
+            && high[i]
+            && !was[i]
+        {
+            let _ = notify::banner(
+                &format!("{name} quota high"),
+                &format!("{name} at {percent}%"),
+            );
+        }
+    }
+    *alerted = Some(high);
 }
 
 /// The menu-bar text: the percentages of the headline tiers, in the

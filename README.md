@@ -1,7 +1,10 @@
 # Gemini Usage — macOS menu-bar meter
 
-A tiny menu-bar app that shows your **Antigravity Gemini quota** as percentages
-in the menu-bar title - `<5h>% · <weekly>%`, the Gemini group's two limits:
+A tiny menu-bar app that shows your **Gemini quota** as percentages in the
+menu-bar title. With the [browser extension](#gemini-app-meters-browser-extension),
+it shows the Gemini app's meters from gemini.google.com/usage. Without it, it
+shows the **Antigravity Gemini quota** - `<5h>% · <weekly>%`, the Gemini group's
+two limits:
 
 - **First number** → the **5-hour** limit used.
 - **Second number** → the **weekly** limit used.
@@ -29,12 +32,65 @@ and with Code Assist Standard or Enterprise licences.
 Earlier versions of this app read Gemini CLI's Code Assist quota. This version
 reads the Antigravity quota of the same Google account.
 
-## ⚠️ These are not the numbers on gemini.google.com/usage
+## Gemini app meters (browser extension)
 
-**Read this before trusting the percentages.**
+The usage page at <https://gemini.google.com/usage> shows the quota of the
+**Gemini app**: *Current usage* (a 5-hour window) and *Weekly limit*. Chats on
+gemini.google.com use this quota. It is **not** the Antigravity quota, and the
+app cannot read it alone (see [below](#why-the-app-does-not-read-the-page-itself)).
 
-The consumer usage page at <https://gemini.google.com/usage> — the 5-hour and
-weekly meters for the Gemini app — has **no token-authenticated API**. It is
+The **Gemini Usage bridge** extension in [`extension/`](extension/) reads it
+inside your browser, with your browser's own Google login. Once a minute it
+sends the two windows to the app on `127.0.0.1:47614`. While reports come in:
+
+- the title shows the Gemini app pair: `<current>% · <weekly>%`;
+- the dropdown shows *Gemini app 5h* and *Gemini app weekly* with their reset
+  times, above an *Antigravity (agy)* header and the Antigravity rows;
+- a window that crosses the alert threshold gives a banner, as the Antigravity
+  windows do.
+
+When no report has come for 10 minutes (the browser is closed), the title goes
+back to the Antigravity pair. The Gemini app rows keep the last numbers and say
+*not updated since …*. Without the extension, the app works as before.
+
+### Install the extension (Brave, Chrome or another Chromium browser)
+
+1. Open `brave://extensions` (or `chrome://extensions`).
+2. Switch on **Developer mode**.
+3. Click **Load unpacked**, and select the `extension/` folder of this repo.
+4. Make sure that you are signed in to gemini.google.com in that browser.
+
+Click the extension's icon to see its last reading, whether the app received
+it, and a *Refresh now* button.
+
+### How the extension reads the page
+
+The usage page runs a persisted GraphQL query, `UsagePageQuery`, at
+`gemini.google.com/_/BardChatUi/graphql/schemas/GEMINI_WEB_GRAPHQL/executeQuery`.
+It is a plain GET with the browser's cookies, so the extension sends it the same
+way. The query's id changes with each deploy of the web app, so the extension
+finds the current id in two steps: the import map in the page HTML names the
+`UsagePageLoading-<hash>.js` bundle, and that bundle holds the id. It keeps the
+id until the query fails, and looks again at least every 6 hours.
+
+The answer has one pool per window: `GXU_FIVE_HOURLY`, `GXU_WEEKLY` and
+`OVERAGE_CREDITS`, each with `percentageUsed` (a fraction) and
+`gxu.windowRefreshesAt`. The extension sends only these fields and the plan
+tier. No cookie, token or page content leaves the browser.
+
+The app's listener takes only `POST /gemini-web-usage` with an
+`Origin: chrome-extension://…` header. A browser sets that header itself, and a
+web page cannot claim an extension origin. Set `GEMINI_WEB_PORT` to move the
+port, and change `APP_URL` in `extension/background.js` and the matching
+`host_permissions` entry in `extension/manifest.json` to match.
+
+This is an undocumented, internal interface of the Gemini web app. When Google
+changes it, the extension's popup says what failed, and the app goes back to
+the Antigravity pair.
+
+### Why the app does not read the page itself
+
+The consumer usage page has **no token-authenticated API**. It is
 served by the Gemini web app and authenticated with whole-account Google session
 cookies (`__Secure-1PSID` / `__Secure-1PSIDTS` plus a `SAPISIDHASH`). Reaching it
 from a background app would mean:
@@ -48,17 +104,8 @@ That is a whole-Google-account credential — the same cookie opens Gmail, Drive
 and Photos — and step 2 means writing and rotating someone's session token in the
 background. Both are the opposite of what this family of apps does (see
 [read-only credentials](#design-decision-read-only-credentials-no-auto-refresh)),
-so this app does not go there.
-
-**What it reads instead** is the quota the same Google account has in
-**Antigravity** - the meters behind `agy`, which `agy` itself shows in `/usage`.
-These come from a scoped OAuth token you already own, and they are real.
-Antigravity's windows are also 5-hour and weekly, but they are **not** the Gemini
-app's meters. The *Open usage page* row still opens `gemini.google.com/usage` for
-convenience, and its tooltip says which is which.
-
-If you want the consumer app's meters specifically, this app is the wrong tool —
-open that page, or use a browser extension that runs inside the logged-in page.
+so this app does not go there. The extension avoids both steps: the browser
+keeps its own session alive, and the app receives numbers only.
 
 ## Service status
 
@@ -265,8 +312,10 @@ The row then shows one of these states:
 
 This app **only reads** the OAuth token `agy` already stored, and **never writes
 credentials, refreshes tokens, or runs its own auth flow**. That is a deliberate
-choice, not an oversight - and it is why the consumer usage page is out of scope,
-since reaching that *requires* rotating a session cookie.
+choice, not an oversight - and it is why the app does not read the consumer usage
+page itself, since reaching that *requires* rotating a session cookie. The
+[browser extension](#gemini-app-meters-browser-extension) reads it inside the
+browser instead, and the app receives numbers only.
 
 The refresh token is in the same Keychain item, and Google's token endpoint is a
 standard OAuth `grant_type=refresh_token` exchange. But the exchange needs
@@ -324,6 +373,7 @@ bundle by the path it was registered from — see below.
 | `CLOUDCODE_ENDPOINT`      | `https://daily-cloudcode-pa.googleapis.com` | Quota host. |
 | `AGY_BIN`                 | `~/.local/bin/agy` | The `agy` binary to read `/usage` from, to ask for its version (User-Agent) and to run for a token refresh. |
 | `GOOGLE_CLOUD_PROJECT`    | —       | API key row: skip the key lookup and use this project id.     |
+| `GEMINI_WEB_PORT`         | `47614` | The local port for the browser extension's reports. |
 | `GEMINI_API_KEY`          | —       | The key for the API key row. Read from the login shell when not set. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `~/.config/gcloud/application_default_credentials.json` | The ADC file for the API key row. |
 | `GOOGLE_CLOUD_QUOTA_PROJECT` | quota project in the ADC file | The project Google charges the API key row's calls to. |
@@ -392,6 +442,7 @@ src/usage/mod.rs        Antigravity quota → window meters; agy credentials; th
 src/usage/apikey.rs     API key → its project, via gcloud ADC (read-only)
 src/usage/monitoring.rs the API key's request count from Cloud Monitoring
 src/status.rs           poll the Workspace Status Dashboard feed → indicator, incidents, products
+src/web.rs              the 127.0.0.1 listener for the browser extension → Gemini app windows
 src/icon.rs             the red status dot, drawn programmatically (no binary assets)
 src/login.rs            open-at-login registration via SMAppService
 src/notify.rs           Notification Centre banner + confirm dialog via osascript
@@ -401,6 +452,7 @@ src/duration.rs         Go-style durations ("2m30s") for the menu text
 src/json.rs             null-tolerant JSON fields
 testdata/               a trimmed capture of the real incident feed
 build/                  Info.plist, make-app.sh, LaunchAgent plist
+extension/              the Gemini Usage bridge browser extension (Manifest V3)
 ```
 
 `src/icon.rs`, `src/login.rs`, `src/notify.rs` and `src/tray.rs` are
@@ -419,6 +471,7 @@ origin, which drew it over the menu-bar icons.)
 
 ```sh
 cargo test      # unit tests (offline)
+node --test extension/gemini.test.mjs   # the extension's parser (offline)
 
 # Opt-in diagnostics against the live endpoints:
 cargo test usage::tests::live_fetch -- --ignored --exact --nocapture   # needs a valid `agy` login
@@ -439,9 +492,10 @@ local server that answers both `:loadCodeAssist` and `:retrieveUserQuotaSummary`
 
 ## Notes & possible extensions
 
-- **Consumer app meters** — see the caveat at the top. Reaching
-  `gemini.google.com/usage` needs browser session cookies and cookie rotation;
-  that is a deliberate non-goal, not a missing feature.
+- **Consumer app meters without a browser** — the
+  [browser extension](#gemini-app-meters-browser-extension) needs the browser to
+  run. Reading `gemini.google.com/usage` without it needs browser session cookies
+  and cookie rotation; that is a deliberate non-goal, not a missing feature.
 - **Two-line display** — MenuMeters-style stacked numbers need a custom view in
   the `NSStatusItem` button, so the title is a single line. `src/tray.rs` owns the
   status item directly, so that is where a stacked variant would go.
