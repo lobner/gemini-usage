@@ -87,7 +87,7 @@ const STATUS_PAGE_URL: &str = "https://www.google.com/appsstatus/dashboard/";
 
 const APP_NAME: &str = "Gemini Usage";
 const REPO_URL: &str = "https://github.com/lobner/gemini-usage";
-const MAX_TIER_ROWS: usize = 4; // a fixed pool of tier rows (rows are never removed)
+const MAX_TIER_ROWS: usize = 6; // a fixed pool of tier rows (rows are never removed)
 const MAX_STATUS_ITEMS: usize = 5; // a fixed pool of incident rows
 const STATUS_ROW_MAX_LEN: usize = 64; // characters for each incident row
 

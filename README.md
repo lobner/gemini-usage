@@ -6,11 +6,11 @@ in the menu-bar title - `<5h>% · <weekly>%`, the Gemini group's two limits:
 - **First number** → the **5-hour** limit used.
 - **Second number** → the **weekly** limit used.
 
-These are the same meters that Antigravity CLI (`agy`) shows in `/usage`. The
-dropdown shows every model group's windows with their reset times (Gemini, and
-Claude and GPT), the [API key row](#api-key-row), the Gemini service status,
-*Open usage page*, *Refresh now*, the last-checked time, *Launch at Login*,
-*About*, and *Quit*. When a window first crosses a threshold (default 80%) you get
+These are the same meters that Antigravity CLI (`agy`) shows in `/usage`, and
+the app reads them from `agy` itself. The dropdown shows every model group's
+windows with their reset times (Gemini; Claude and GPT; Gemini 4 Argon), the
+[API key row](#api-key-row), the Gemini service status, *Open usage page*,
+*Refresh now*, the last-checked time, *Launch at Login*, *About*, and *Quit*. When a window first crosses a threshold (default 80%) you get
 a Notification Centre banner.
 
 It is a sibling of [claude-usage](https://github.com/lobner/claude-usage) and
@@ -101,7 +101,8 @@ not the same endpoint and not the same limit.
 
 - **The status dashboard** - no credentials, no limit - every `POLL_SECONDS`
   (60 s), so the outage dot stays responsive.
-- **The quota endpoint** - every `USAGE_SECONDS` (60 s, floor 30 s).
+- **The quota** - the `agy -p /usage` run, or the quota endpoint as the
+  fallback - every `USAGE_SECONDS` (60 s, floor 30 s).
 - **The API key row** - every `USAGE_SECONDS`, on its own schedule, so a quota
   back-off does not freeze it.
 
@@ -115,15 +116,45 @@ reason instead of just "failed".
 
 ## How it works
 
-Every `USAGE_SECONDS` it makes up to two calls against
+Every `USAGE_SECONDS` it runs:
+
+```sh
+agy -p /usage --output-format json --log-file /dev/null
+```
+
+This is `agy`'s documented print mode for `/usage`. It prints the `/usage` panel
+as JSON, starts no agent turn, uses no quota and keeps no conversation. One run
+takes about 3.5 s. `--log-file /dev/null` stops each run from adding a 20 KB log
+file to `~/.gemini/antigravity-cli/log`. The app finds `agy` in `AGY_BIN`,
+`~/.local/bin` or `PATH`, and runs it in your home directory.
+
+### Why not call Google directly any more
+
+Since `agy` 1.5, `:retrieveUserQuotaSummary` gives this app the *Claude and GPT*
+group only. `agy` still shows *Gemini Models* and *Gemini 4 Argon*, with the same
+token and the same project. `agy` gets those groups from a source that this app
+cannot see, so the app asks `agy`.
+
+### The fallback: the direct call
+
+When `agy` is not installed, fails or prints something the app cannot read, the
+app makes up to two calls against
 `https://daily-cloudcode-pa.googleapis.com/v1internal` - the same internal
-endpoint `agy` uses - with `agy`'s stored OAuth token:
+endpoint `agy` uses - with `agy`'s stored OAuth token. These calls give only the
+*Claude and GPT* group now, but they tell why things fail: an expired token, no
+quota, a rate limit. The menu uses that for its `⚠` rows.
 
 1. `:loadCodeAssist` with `ideType: ANTIGRAVITY` → the account's project id. The
    result is cached for the life of the process, so this is normally paid once.
-2. `:retrieveUserQuotaSummary` with `{"project": "<id>"}` → model groups
-   (*Gemini Models*, *Claude and GPT models*), each with a `5h` and a `weekly`
-   bucket: `bucketId`, `remainingFraction` and `resetTime`.
+2. `:retrieveUserQuotaSummary` with `{"project": "<id>"}` → model groups, each
+   with a `5h` and a `weekly` bucket: `bucketId`, `remainingFraction` and
+   `resetTime`.
+
+### Both sources
+
+`agy`'s JSON has the same groups and buckets as the summary, with other field
+names (`id`, `remaining_fraction`, `reset_time`). Both go through the same
+parsing. *Gemini 4 Argon* has a weekly bucket only.
 
 `remainingFraction` is inverted into a *used* percentage, which is the direction
 every other meter in this app reads. The 5-hour window comes before the weekly one,
@@ -155,7 +186,11 @@ There is no officially documented API for this data.
 
 The app is **read-only**: it uses whatever OAuth token `agy` has stored and
 **never refreshes or writes it**. That token lasts about an hour, and only running
-`agy` (or the Antigravity app) refreshes it. So:
+`agy` (or the Antigravity app) refreshes it.
+
+Each poll runs `agy -p /usage`, and `agy` refreshes and stores its own token when
+it is close to expiry. So while `agy` is installed and logged in, the token stays
+fresh and you do not see the rows below. They apply when `agy` cannot run:
 
 - While the token is valid, the numbers refresh every `USAGE_SECONDS` as expected.
 - Once it expires, every poll returns "token expired", the title shows **"⚠"**,
@@ -242,7 +277,13 @@ your login.
 
 The *Run `agy` to refresh* row keeps to this rule. It only starts `agy` when you
 click it. `agy` refreshes and writes its own token with its own client, and the
-app reads the result as usual. The app never refreshes on its own schedule.
+app reads the result as usual.
+
+The `agy -p /usage` run on each poll keeps to the rule too, but it changes one
+thing: `agy` can now refresh its token on the app's schedule. That is `agy`
+doing its own work with its own client, as it does whenever you use it. The app
+still never reads the refresh token, never calls Google's token endpoint and
+never writes the Keychain item.
 
 The [API key row](#api-key-row) does exchange a refresh token, but only the gcloud
 ADC one, with gcloud's own client, and only in memory. The app never writes the ADC
@@ -281,7 +322,7 @@ bundle by the path it was registered from — see below.
 | `ALERT_PERCENT`           | `80`    | Banner when a window first reaches this %. `0` disables alerts. |
 | `STATUS_URL`              | `https://www.google.com/appsstatus/dashboard/incidents.json` | Incident feed to poll for the outage dot. |
 | `CLOUDCODE_ENDPOINT`      | `https://daily-cloudcode-pa.googleapis.com` | Quota host. |
-| `AGY_BIN`                 | `~/.local/bin/agy` | The `agy` binary to ask for its version (User-Agent) and to run for a token refresh. |
+| `AGY_BIN`                 | `~/.local/bin/agy` | The `agy` binary to read `/usage` from, to ask for its version (User-Agent) and to run for a token refresh. |
 | `GOOGLE_CLOUD_PROJECT`    | —       | API key row: skip the key lookup and use this project id.     |
 | `GEMINI_API_KEY`          | —       | The key for the API key row. Read from the login shell when not set. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `~/.config/gcloud/application_default_credentials.json` | The ADC file for the API key row. |
@@ -404,7 +445,7 @@ local server that answers both `:loadCodeAssist` and `:retrieveUserQuotaSummary`
 - **Two-line display** — MenuMeters-style stacked numbers need a custom view in
   the `NSStatusItem` button, so the title is a single line. `src/tray.rs` owns the
   status item directly, so that is where a stacked variant would go.
-- **More windows in the title** - the dropdown shows up to four windows (two per
+- **More windows in the title** - the dropdown shows up to six windows (two per
   model group); the title keeps to the Gemini pair to keep the menu-bar footprint
   small.
 - **Per-model quotas** - `:retrieveUserQuota` returns one bucket per model id

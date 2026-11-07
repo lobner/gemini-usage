@@ -1,13 +1,18 @@
 //! Gets the Gemini quota windows that Antigravity CLI (`agy`) shows in its
-//! /usage panel - a 5-hour and a weekly limit for each model group - from
-//! Google's Cloud Code API, with agy's stored OAuth token.
+//! /usage panel - a 5-hour and a weekly limit for each model group. It asks
+//! agy for the panel as JSON (`agy -p /usage --output-format json`). When that
+//! fails, it calls Google's Cloud Code API itself, with agy's stored OAuth
+//! token. That call no longer returns the Gemini group, but it tells why
+//! things fail: an expired token, no quota, a rate limit.
 //!
 //! It is READ-ONLY: it reads the token from the macOS Keychain (or the token
 //! file of the Antigravity app) but never refreshes or writes it. The access
 //! token lasts approximately one hour, and only running `agy` refreshes it.
-//! After it has expired, `fetch` returns `Kind::TokenExpired` until the next
-//! refresh. The menu can start that refresh on request with
-//! `refresh_agy_token`, which runs agy and lets agy write its own token.
+//! Each `agy -p /usage` run can do that, so the token stays fresh while agy is
+//! installed. Without agy, after the token has expired, `fetch` returns
+//! `Kind::TokenExpired` until the next refresh. The menu can start that
+//! refresh on request with `refresh_agy_token`, which runs agy and lets agy
+//! write its own token.
 //!
 //! # Why Antigravity
 //!
@@ -233,9 +238,138 @@ impl Usage {
 /// resolved once and used again. A 401 clears it, with everything else.
 static PROJECT_CACHE: Mutex<String> = Mutex::new(String::new());
 
-/// Reads agy's stored OAuth token and queries the quota summary. All the work
-/// stops at `deadline`.
+/// Gets the quota windows. It asks agy first, as agy's /usage panel is the
+/// source of truth. When agy is not there or fails, it reads agy's stored
+/// OAuth token and queries the quota summary itself, which also tells why it
+/// failed. All the work stops at `deadline`.
 pub fn fetch(deadline: Instant) -> Result<Usage, Error> {
+    // A fixture endpoint is a test of the direct call: agy would ask Google.
+    if env::var("CLOUDCODE_ENDPOINT").trim().is_empty()
+        && let Some(u) = fetch_from_agy(deadline)
+    {
+        return Ok(u);
+    }
+    fetch_direct(deadline)
+}
+
+/// Runs `agy -p /usage --output-format json`, which prints the /usage panel
+/// as JSON. It starts no agent turn, uses no quota and keeps no conversation.
+///
+/// Since agy 1.5, Google's retrieveUserQuotaSummary answers this app with the
+/// "Claude and GPT" group only. agy still shows the Gemini group and the
+/// Gemini 4 Argon group, from the same token and project, so it gets them
+/// from a source that this app cannot see. Asking agy keeps the numbers the
+/// same as in agy.
+///
+/// agy may refresh its own OAuth token while it runs, as it does when you use
+/// it. This app still never reads the refresh token or writes the token.
+fn fetch_from_agy(deadline: Instant) -> Option<Usage> {
+    let bin = agy_candidates()
+        .into_iter()
+        .find(|b| std::fs::metadata(b).is_ok_and(|m| m.is_file()))?;
+    let mut cmd = Command::new(bin);
+    // Each run otherwise leaves a new log file of about 20 KB in
+    // ~/.gemini/antigravity-cli/log, which is one each poll.
+    cmd.args([
+        "-p",
+        "/usage",
+        "--output-format",
+        "json",
+        "--log-file",
+        "/dev/null",
+    ]);
+    // agy records its working directory as a workspace. An app started from
+    // Finder runs in "/", so use the home directory, which agy already knows.
+    let home = env::var("HOME");
+    if !home.is_empty() {
+        cmd.current_dir(home);
+    }
+    let out = output_by(cmd, deadline)?;
+    parse_agy_usage(&out).ok()
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct AgyBucket {
+    #[serde(deserialize_with = "nullable")]
+    id: String,
+    #[serde(deserialize_with = "nullable")]
+    window: String,
+    #[serde(deserialize_with = "nullable")]
+    reset_time: String,
+    remaining_fraction: Option<f64>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct AgyGroup {
+    #[serde(deserialize_with = "nullable")]
+    name: String,
+    #[serde(deserialize_with = "nullable")]
+    buckets: Vec<AgyBucket>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct AgyData {
+    #[serde(deserialize_with = "nullable")]
+    groups: Vec<AgyGroup>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct AgyCommand {
+    #[serde(deserialize_with = "nullable")]
+    data: AgyData,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct AgyOutput {
+    #[serde(deserialize_with = "nullable")]
+    status: String,
+    #[serde(deserialize_with = "nullable")]
+    command: AgyCommand,
+}
+
+fn parse_agy_usage(body: &[u8]) -> Result<Usage, Error> {
+    parse_agy_usage_at(body, Utc::now())
+}
+
+/// Converts agy's /usage JSON into the shape of the quota summary, so both
+/// sources go through the same parsing.
+fn parse_agy_usage_at(body: &[u8], now: DateTime<Utc>) -> Result<Usage, Error> {
+    let r: AgyOutput = serde_json::from_slice(body)
+        .map_err(|e| Error::other(format!("parsing agy /usage JSON: {e}")))?;
+    if r.status != "SUCCESS" {
+        return Err(Error::other(format!("agy /usage status {:?}", r.status)));
+    }
+    let summary = SummaryResponse {
+        groups: r
+            .command
+            .data
+            .groups
+            .into_iter()
+            .map(|g| SummaryGroup {
+                display_name: g.name,
+                buckets: g
+                    .buckets
+                    .into_iter()
+                    .map(|b| SummaryBucket {
+                        bucket_id: b.id,
+                        window: b.window,
+                        reset_time: b.reset_time,
+                        remaining_fraction: b.remaining_fraction,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    summary_to_usage(&summary, now)
+}
+
+/// Reads agy's stored OAuth token and queries the quota summary.
+fn fetch_direct(deadline: Instant) -> Result<Usage, Error> {
     let cred = load_credentials(deadline)?;
     // Do not hammer the endpoint with a known-dead token: if it has already
     // expired locally, report it without a doomed request. A live 401 is still
@@ -585,7 +719,10 @@ fn parse_summary(body: &[u8]) -> Result<Usage, Error> {
 fn parse_summary_at(body: &[u8], now: DateTime<Utc>) -> Result<Usage, Error> {
     let r: SummaryResponse = serde_json::from_slice(body)
         .map_err(|e| Error::other(format!("parsing quota JSON: {e}")))?;
+    summary_to_usage(&r, now)
+}
 
+fn summary_to_usage(r: &SummaryResponse, now: DateTime<Utc>) -> Result<Usage, Error> {
     let mut u = Usage::default();
     for g in &r.groups {
         let group = group_name(&g.display_name);
@@ -888,6 +1025,90 @@ mod tests {
   ],
   "description": "Within each group, models share a weekly limit and a 5-hour limit."
 }"#;
+
+    /// A trimmed live `agy -p /usage --output-format json` answer (agy 1.5.1),
+    /// with some use added.
+    const AGY_SAMPLE: &str = r#"{"conversation_id":"","status":"SUCCESS","response":"Gemini Models\tWeekly Limit Remaining\t90%\t2026-11-14T16:18:00Z\n","duration_seconds":0,"num_turns":0,
+"command":{"name":"usage","data":{"description":"Within each group, models share a weekly limit and a 5-hour limit.","groups":[
+  {"name":"Gemini Models","description":"Models within this group: Gemini Flash, Gemini Pro","buckets":[
+    {"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.9,"reset_time":"2026-11-14T16:18:00Z"},
+    {"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.58,"reset_time":"2026-11-07T21:18:00Z"}]},
+  {"name":"Claude and GPT models","description":"Models within this group: Claude Opus, Claude Sonnet, GPT-OSS","buckets":[
+    {"id":"3p-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":1,"reset_time":"2026-11-14T17:58:19Z"},
+    {"id":"3p-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":1,"reset_time":"2026-11-07T22:58:19Z"}]},
+  {"name":"Gemini 4 Argon","description":"For paid Pro plans, Argon quota is separate.","buckets":[
+    {"id":"gemini-argon-wtu-weekly","name":"Gemini 4 Argon Weekly Limit","window":"weekly","remaining_fraction":0.976,"reset_time":"2026-11-14T16:16:59Z"}]}
+]}}}"#;
+
+    #[test]
+    fn parse_agy_usage_reads_every_group() {
+        let u = parse_agy_usage(AGY_SAMPLE.as_bytes()).expect("parse");
+        let names: Vec<&str> = u.tiers.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Gemini 5h",
+                "Gemini weekly",
+                "Claude and GPT 5h",
+                "Claude and GPT weekly",
+                "Gemini 4 Argon weekly"
+            ]
+        );
+        let m = u.tier("Gemini 5h").unwrap();
+        assert!(
+            m.percent == 42 && m.bucket == "gemini-5h" && m.resets_at.is_some(),
+            "{m:?}"
+        );
+        assert_eq!(u.tier("Gemini weekly").unwrap().percent, 10);
+        assert_eq!(u.tier("Gemini 4 Argon weekly").unwrap().percent, 2);
+        let h: Vec<&str> = u.headline().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(h, ["Gemini 5h", "Gemini weekly"]);
+    }
+
+    #[test]
+    fn parse_agy_usage_rejects_failures() {
+        for body in [
+            r#"{"status":"ERROR","command":{"data":{"groups":[]}}}"#,
+            r#"{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[]}}}"#,
+            r#"{"status":"SUCCESS"}"#,
+            "Please sign in",
+        ] {
+            assert!(parse_agy_usage(body.as_bytes()).is_err(), "{body}");
+        }
+    }
+
+    /// Runs a stand-in agy that prints the sample, and checks the arguments.
+    #[test]
+    fn fetch_from_agy_runs_print_mode() {
+        let dir = std::env::temp_dir().join(format!("geminiusage-agy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sample = dir.join("usage.json");
+        std::fs::write(&sample, AGY_SAMPLE).unwrap();
+        let script = dir.join("agy");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n[ \"$*\" = \"-p /usage --output-format json --log-file /dev/null\" ] || exit 2\ncat '{}'\n",
+                sample.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let deadline = || Instant::now() + Duration::from_secs(5);
+        env::overrides::set("AGY_BIN", script.to_str().unwrap());
+        let u = fetch_from_agy(deadline()).expect("usage from the stand-in agy");
+        assert_eq!(u.tiers.len(), 5);
+
+        env::overrides::set("AGY_BIN", "/usr/bin/false");
+        env::overrides::set("HOME", dir.to_str().unwrap());
+        assert!(
+            fetch_from_agy(deadline()).is_none(),
+            "a failed run is no usage"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn bucket(window: &str, reset: &str) -> SummaryBucket {
         SummaryBucket {
