@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Usage bridge",
+  "version": "1.0.0",
+  "description": "Sends your Gemini app usage (gemini.google.com/usage) to the Gemini Usage menu-bar app on this Mac.",
+  "minimum_chrome_version": "120",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["alarms", "storage"],
+  "host_permissions": [
+    "https://gemini.google.com/*",
+    "https://www.gstatic.com/bg3/boq-bard-web/*",
+    "http://127.0.0.1:47614/*"
+  ],
+  "action": {
+    "default_title": "Gemini Usage bridge",
+    "default_popup": "popup.html"
+  }
+}
