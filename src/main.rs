@@ -18,8 +18,8 @@
 //! session cookies. This app does not touch those cookies.
 //!
 //! The Gemini app's meters come in from the browser extension in `extension/`
-//! instead (see the web module). While the extension reports, its two windows
-//! take the title, and the Antigravity windows stay in the dropdown.
+//! instead (see the web module). Once the extension has reported, its two
+//! windows take the title, and the Antigravity windows stay in the dropdown.
 //!
 //! The two sources are polled at different rates. The status dashboard needs
 //! no credentials and has no rate limit, so it is read every POLL_SECONDS. The
@@ -818,8 +818,8 @@ fn update_ui(u: &usage::Usage) {
 }
 
 /// What the Antigravity side last asked for in the title and the tooltip. The
-/// Gemini app windows from the browser extension take their place while they
-/// are fresh. So every writer goes through set_quota_title and
+/// Gemini app windows from the browser extension take their place once the
+/// extension has reported. So every writer goes through set_quota_title and
 /// set_quota_tooltip, and render_title decides.
 static QUOTA_TITLE: Mutex<(String, String)> = Mutex::new((String::new(), String::new()));
 
@@ -833,18 +833,29 @@ fn set_quota_tooltip(tooltip: &str) {
     render_title();
 }
 
-/// Puts the fresh Gemini app windows in the title, or else what the
-/// Antigravity side asked for. It holds the lock while it writes, so two
-/// threads cannot leave the older title on screen.
+/// Puts the Gemini app windows in the title once the extension has reported,
+/// or else what the Antigravity side asked for. A stale reading keeps the
+/// title: the last numbers are still the best ones there are. It holds the
+/// lock while it writes, so two threads cannot leave the older title on
+/// screen.
 fn render_title() {
     let q = QUOTA_TITLE.lock().unwrap();
-    match fresh_reading(Utc::now()) {
+    let now = Utc::now();
+    match web::state().reading {
         Some(r) => {
-            tray::set_title(&web_title(&r));
-            tray::set_tooltip(&format!(
-                "Gemini app - {}% current, {}% weekly · {}",
-                r.five_hour.percent, r.weekly.percent, q.1
-            ));
+            let mut tip = format!(
+                "Gemini app - {}% current, {}% weekly",
+                r.five_hour.percent_at(now),
+                r.weekly.percent_at(now)
+            );
+            if r.is_stale(now) {
+                tip += &format!(
+                    " (not updated since {})",
+                    r.read_at.with_timezone(&Local).format("%H:%M")
+                );
+            }
+            tray::set_title(&web_title(&r, now));
+            tray::set_tooltip(&format!("{tip} · {}", q.1));
         }
         None => {
             tray::set_title(&q.0);
@@ -853,18 +864,18 @@ fn render_title() {
     }
 }
 
-fn fresh_reading(now: DateTime<Utc>) -> Option<web::Reading> {
-    web::state().reading.filter(|r| !r.is_stale(now))
-}
-
 /// The title for the Gemini app windows: "<current>% · <weekly>%", the same
 /// shape as the Antigravity pair.
-fn web_title(r: &web::Reading) -> String {
-    format!("{}% · {}%", r.five_hour.percent, r.weekly.percent)
+fn web_title(r: &web::Reading, now: DateTime<Utc>) -> String {
+    format!(
+        "{}% · {}%",
+        r.five_hour.percent_at(now),
+        r.weekly.percent_at(now)
+    )
 }
 
 /// Shows the browser extension's last report in the Gemini app rows, and
-/// gives the title to its windows while they are fresh.
+/// gives the title to its windows.
 fn render_web() {
     let m = menu();
     let st = web::state();
@@ -903,10 +914,17 @@ fn render_web() {
     }
     let windows = [("5h", &r.five_hour), ("weekly", &r.weekly)];
     for (i, (label, w)) in windows.into_iter().enumerate() {
-        m.web[i].set_title(&format!("Gemini app {label}: {}%", w.percent));
+        m.web[i].set_title(&format!("Gemini app {label}: {}%", w.percent_at(now)));
         m.web[i].set_tooltip(&tip);
         m.web[i].show();
         match w.resets_at {
+            Some(t) if t <= now => {
+                m.web_resets[i].set_title(&format!(
+                    "    reset at {}",
+                    t.with_timezone(&Local).format("%H:%M")
+                ));
+                m.web_resets[i].show();
+            }
             Some(t) => {
                 m.web_resets[i].set_title(&format!("    resets {}", humanize_reset(t, now)));
                 m.web_resets[i].show();
@@ -916,7 +934,7 @@ fn render_web() {
     }
     if r.is_stale(now) {
         // The browser is closed, or the extension stopped: say so where the
-        // numbers are, as the title has gone back to Antigravity.
+        // numbers are, as the title keeps the last numbers.
         m.web_resets[0].set_title(&format!(
             "    not updated since {} - is the browser running?",
             r.read_at.with_timezone(&Local).format("%H:%M")

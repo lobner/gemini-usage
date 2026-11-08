@@ -49,9 +49,10 @@ sends the two windows to the app on `127.0.0.1:47614`. While reports come in:
 - a window that crosses the alert threshold gives a banner, as the Antigravity
   windows do.
 
-When no report has come for 10 minutes (the browser is closed), the title goes
-back to the Antigravity pair. The Gemini app rows keep the last numbers and say
-*not updated since …*. Without the extension, the app works as before.
+When no report has come for 10 minutes (the browser is closed), the title and
+the Gemini app rows keep the last numbers, and the rows say *not updated since
+…*. A window whose reset time has passed since the last report shows 0%, as
+the usage page would. Without the extension, the app works as before.
 
 ### Install the extension (Brave, Chrome or another Chromium browser)
 
@@ -85,8 +86,8 @@ port, and change `APP_URL` in `extension/background.js` and the matching
 `host_permissions` entry in `extension/manifest.json` to match.
 
 This is an undocumented, internal interface of the Gemini web app. When Google
-changes it, the extension's popup says what failed, and the app goes back to
-the Antigravity pair.
+changes it, the extension's popup says what failed, and the app keeps the last
+numbers that it received.
 
 ### Why the app does not read the page itself
 

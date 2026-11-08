@@ -41,6 +41,17 @@ pub struct Window {
     pub resets_at: Option<DateTime<Utc>>,
 }
 
+impl Window {
+    /// The percentage to show at `now`. A window that has reset since the
+    /// reading starts again from 0, so the old number would be wrong.
+    pub fn percent_at(&self, now: DateTime<Utc>) -> i64 {
+        match self.resets_at {
+            Some(t) if t <= now => 0,
+            _ => self.percent,
+        }
+    }
+}
+
 /// A good reading: the two windows that the usage page shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reading {
@@ -322,6 +333,26 @@ mod tests {
         assert_eq!(r.read_at, rfc3339("2026-11-07T17:54:51Z").unwrap());
         assert!(!r.is_stale(now()));
         assert!(r.is_stale(now() + TimeDelta::minutes(10)));
+    }
+
+    #[test]
+    fn a_window_that_has_reset_shows_zero() {
+        let Ok(Report::Usage(r)) = parse_report(GOOD.as_bytes(), now()) else {
+            panic!("not a reading");
+        };
+        // Stale, but neither window has reset yet: keep the last numbers.
+        let later = rfc3339("2026-11-07T21:44:00Z").unwrap();
+        assert_eq!(r.five_hour.percent_at(later), 42);
+        assert_eq!(r.weekly.percent_at(later), 10);
+        // The 5-hour window reset at 21:45; the weekly one did not.
+        let after = rfc3339("2026-11-07T21:45:00Z").unwrap();
+        assert_eq!(r.five_hour.percent_at(after), 0);
+        assert_eq!(r.weekly.percent_at(after), 10);
+        let no_reset = Window {
+            percent: 7,
+            resets_at: None,
+        };
+        assert_eq!(no_reset.percent_at(after), 7);
     }
 
     #[test]
