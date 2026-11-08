@@ -16,6 +16,8 @@ windows with their reset times (Gemini; Claude and GPT; Gemini 4 Argon), the
 *Refresh now*, the last-checked time, *Launch at Login*, *About*, and *Quit*. When a window first crosses a threshold (default 80%) you get
 a Notification Centre banner.
 
+<img width="448" alt="The menu bar showing 4% · 11%, and the dropdown: the Gemini app meters from the browser extension, the Antigravity groups with reset times, the API key row, service status, Launch at Login and the About row" src="docs/menu.png" />
+
 It is a sibling of [claude-usage](https://github.com/lobner/claude-usage) and
 [github-usage](https://github.com/lobner/github-usage), and deliberately keeps
 the same menu structure.
